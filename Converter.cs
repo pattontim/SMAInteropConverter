@@ -31,7 +31,7 @@ namespace SMAInteropConverter
         private bool AddedMethods { get; set; }
         private bool AddedEvents { get; set; }
 
-        private CompilerParameters CompilerParams { get; } = new CompilerParameters { GenerateInMemory = true, GenerateExecutable = false, TempFiles = new TempFileCollection("C:\\TempFiles", true) };
+        private CompilerParameters CompilerParams { get; } = new CompilerParameters { GenerateInMemory = true, GenerateExecutable = false};
         private Action<string> Logger { get; }
         private string XmlDocsPath { get; }
 
