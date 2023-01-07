@@ -14,6 +14,9 @@ namespace SMAInteropConverter
     public class Converter : ConverterBase
     {
         private List<RegistryType> RegPairs { get; }
+
+        private string[] skip = new string[] { "FindByName", "GetChildren", "GetLinkedElements"};
+
         private Type Wrapped { get; }
         private CodeFieldReferenceExpression WrappedRef { get; set; }
         private VariableNameCreator Namer { get; } = new VariableNameCreator();
@@ -28,7 +31,7 @@ namespace SMAInteropConverter
         private bool AddedMethods { get; set; }
         private bool AddedEvents { get; set; }
 
-        private CompilerParameters CompilerParams { get; } = new CompilerParameters { GenerateInMemory = true, GenerateExecutable = false };
+        private CompilerParameters CompilerParams { get; } = new CompilerParameters { GenerateInMemory = true, GenerateExecutable = false, TempFiles = new TempFileCollection("C:\\TempFiles", true) };
         private Action<string> Logger { get; }
         private string XmlDocsPath { get; }
 
@@ -181,22 +184,34 @@ namespace SMAInteropConverter
             var propertyName = getter.Name.GetPropertyName();
             var method = CodeDomEx.CreateMethod(getter.Name.GetNormalMethodName(), retType);
 
-            if (Wrapped.IsRegMember(RegPairs, out var regPair))
+            if (skip.Any(x => method.Name.Equals(x)))
             {
-                CodeFieldReferenceExpression regRef;
-                if (!TryGetReferenceToFieldOfType(regPair.Registry, out regRef))
+                CodeThrowExceptionStatement throwException = new CodeThrowExceptionStatement(
+                    new CodeObjectCreateExpression(
+                    new CodeTypeReference(typeof(System.NotImplementedException)),
+                    new CodeExpression[] { }));
+                method.Statements.Add(throwException);
+                method.ReturnType = new CodeTypeReference(retType);
+                AddImportIfNotExists("System.Linq");
+            } else
+            {
+                if (Wrapped.IsRegMember(RegPairs, out var regPair))
                 {
-                    regRef = AddConstructorInitializedField(regPair.Registry);
-                }
+                    CodeFieldReferenceExpression regRef;
+                    if (!TryGetReferenceToFieldOfType(regPair.Registry, out regRef))
+                    {
+                        regRef = AddConstructorInitializedField(regPair.Registry);
+                    }
 
-                var localInstanceRef = GetRegistryMemberFromRegistryField(method, regPair, regRef);
-                var propertyReference = new CodePropertyReferenceExpression(localInstanceRef, propertyName);
-                ConvertReturnedProperty(method, retType, propertyReference);
-            }
-            else
-            {
-                var wrapPropRef = new CodePropertyReferenceExpression(WrappedRef, propertyName);
-                ConvertReturnedProperty(method, retType, wrapPropRef);
+                    var localInstanceRef = GetRegistryMemberFromRegistryField(method, regPair, regRef);
+                    var propertyReference = new CodePropertyReferenceExpression(localInstanceRef, propertyName);
+                    ConvertReturnedProperty(method, retType, propertyReference);
+                }
+                else
+                {
+                    var wrapPropRef = new CodePropertyReferenceExpression(WrappedRef, propertyName);
+                    ConvertReturnedProperty(method, retType, wrapPropRef);
+                }
             }
 
             Klass.Members.Add(method);
@@ -386,21 +401,47 @@ namespace SMAInteropConverter
                 var varRef = new CodeVariableReferenceExpression(decl.Name);
                 var assignment = new CodeAssignStatement(varRef, invoke);
                 var prop = new CodePropertyReferenceExpression(varRef, "Id");
+
+                if (skip.Any(x => invoke.Method.MethodName.Equals(x)))
+                {
+                    CodeThrowExceptionStatement throwException = new CodeThrowExceptionStatement(
+                        new CodeObjectCreateExpression(
+                        new CodeTypeReference(typeof(System.NotImplementedException)),
+                        new CodeExpression[] { }));
+                    method.Statements.Add(throwException);
+                    method.ReturnType = new CodeTypeReference(typeof(IEnumerable<int>));
+                    AddImportIfNotExists("System.Linq");
+                } else
+                {
                 method.Statements.Add(decl);
                 method.Statements.Add(assignment);
                 method.Statements.Add(new CodeMethodReturnStatement(prop));
                 method.ReturnType = new CodeTypeReference(typeof(int));
+                }
             }
             else if (retType.IsGenericType && retType.GetGenericTypeDefinition() == typeof(IEnumerable<>) && retType.GetGenericArguments()[0].IsRegMember(RegPairs, out _))
             {
                 var decl = new CodeVariableDeclarationStatement(new CodeTypeReference(retType), Namer.GetName());
                 var varRef = new CodeVariableReferenceExpression(decl.Name);
                 var assignment = new CodeAssignStatement(varRef, invoke);
-                method.Statements.Add(decl);
-                method.Statements.Add(assignment);
-                method.Statements.Add(new CodeMethodReturnStatement(new CodeSnippetExpression(decl.Name + ".Select(x => x.Id)")));
-                method.ReturnType = new CodeTypeReference(typeof(IEnumerable<int>));
-                AddImportIfNotExists("System.Linq");
+                //var prop = new CodePropertyReferenceExpression(varRef, "Id");
+
+                if (skip.Any(x => invoke.Method.MethodName.Equals(x))){
+                    CodeThrowExceptionStatement throwException = new CodeThrowExceptionStatement(
+                        new CodeObjectCreateExpression(
+                        new CodeTypeReference(typeof(System.NotImplementedException)),
+                        new CodeExpression[] { }));
+                    method.Statements.Add(throwException);
+                    method.ReturnType = new CodeTypeReference(typeof(IEnumerable<int>));
+                    AddImportIfNotExists("System.Linq");
+                } else
+                {
+                    method.Statements.Add(decl);
+                    method.Statements.Add(assignment);
+                    method.Statements.Add(new CodeMethodReturnStatement(new CodeSnippetExpression(/*varRef.VariableName + '.' + */decl.Name + ".Select(x => x.Id)")));
+                    method.ReturnType = new CodeTypeReference(typeof(IEnumerable<int>));
+                    AddImportIfNotExists("System.Linq");
+                }
             }
             else
             {
